@@ -400,63 +400,45 @@ function parseFloorStr(str) {
 }
 
 // ── 直接呼叫新北市開放資料 API（支援 CORS）──
-const NTPC_API = 'https://data.ntpc.gov.tw/api/v1/rest/datastore/acce802d-58cc-4dff-9e7a-9ecc517f78be';
-
+// ── 透過 Netlify proxy 呼叫新北市 API ──
 async function fetchAllPages(community, dateFrom, dateTo) {
-  const LIMIT = 1000;
-  const MAX   = 5000;
-  let offset  = 0;
-  let total   = null;
+  const SIZE = 1000;
+  const MAX_PAGES = 5;
+  let page = 1;
   let results = [];
-
-  const rocFrom = toRocDate(dateFrom, 'start');
-  const rocTo   = toRocDate(dateTo, 'end');
-  const type    = document.getElementById('buildingType').value;
+  const type = document.getElementById('buildingType').value;
   const floorFilter = getFloorFilter();
 
-  while (offset < MAX) {
-    const params = new URLSearchParams({
-      limit:  LIMIT,
-      offset: offset,
-      'rps02[like]':              `%${community}%`,
-      'rps07_yyymmddroc[gte]':    rocFrom,
-      'rps07_yyymmddroc[lte]':    rocTo,
-    });
-
-    const resp = await fetch(`${NTPC_API}?${params}`);
-    if (!resp.ok) throw new Error(`API 回應錯誤 (${resp.status})，請稍後再試`);
+  while (page <= MAX_PAGES) {
+    const url = `/api/proxy?${new URLSearchParams({ community, dateFrom, dateTo, page, size: SIZE })}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
     const json = await resp.json();
+    const raw = json.records || [];
 
-    const raw = json.result?.records || json.records || [];
-
-    // 解析 + 過濾
-    const records = raw
-      .map(parseRecord)
-      .filter(r => {
-        if (!r) return false;
-        if (type && !r.type.includes(type)) return false;
-        if (floorFilter && r.floor) {
-          if (r.floor < floorFilter.min || r.floor > floorFilter.max) return false;
-        }
-        return true;
-      });
+    const records = raw.filter(r => {
+      if (type && !r.type.includes(type)) return false;
+      if (floorFilter && r.floor) {
+        if (r.floor < floorFilter.min || r.floor > floorFilter.max) return false;
+      }
+      return true;
+    });
 
     results = results.concat(records);
 
-    const apiTotal = json.result?.total || json.total || 0;
-    if (total === null) total = Math.min(apiTotal, MAX);
-    offset += LIMIT;
-
-    const pct = Math.min(Math.round(offset / (total || LIMIT) * 90), 90);
+    const pct = Math.min(page / MAX_PAGES * 90, 90);
     setProgress(pct);
-    setStatus(`正在載入… ${results.length} 筆`, 'loading');
+    setStatus(`正在載入… 已取得 ${results.length} 筆`, 'loading');
 
-    if (raw.length < LIMIT || offset >= apiTotal) break;
+    if (raw.length < SIZE) break;
+    page++;
   }
 
   return results;
 }
-
 // ── 渲染所有區塊 ──
 function renderAll(data) {
   renderStats(data);
