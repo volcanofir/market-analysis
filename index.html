@@ -905,6 +905,10 @@ function loadUnitLookupFromSheet2(rows){
 // ── Parser 1：社區匯出（含新版欄位）──
 // ════════════════════════════════════════════
 function parseRow(r){
+  const keys=Object.keys(r);
+  const cleanKey=k=>String(k||'').replace(/\s+/g,'').replace(/[()（）]/g,'');
+  const findKey=fn=>keys.find(k=>fn(cleanKey(k),k));
+
   // ── 排除頁尾說明列 ──
   // 支援兩種地址欄位名稱：「地址」（社區匯出）/ 「地段位置或門牌」（政府原始格式）
   const addrRaw=String(r['地址']||r['地段位置或門牌']||'').trim();
@@ -932,17 +936,17 @@ function parseRow(r){
   const typeRaw=String(r['型態']||'').trim();
   if(typeRaw==='車位')return null;
 
-  const unitKey=Object.keys(r).find(k=>k==='單價'||k.includes('單價'))||'單價';
+  const unitKey=findKey(k=>k==='單價'||k.includes('單價'))||'單價';
   const unitRaw=String(r[unitKey]||'').trim();
   if(!unitRaw||unitRaw==='-'||unitRaw==='--')return null;
   let unitPrice=parseFloat(unitRaw.replace(/,/g,''));
-  if(unitKey.includes('平方公尺'))unitPrice=unitPrice*3.305785/10000;
+  if(cleanKey(unitKey).includes('平方公尺'))unitPrice=unitPrice*3.305785/10000;
   if(!unitPrice||isNaN(unitPrice)||unitPrice<3||unitPrice>600)return null;
 
-  const areaKey=Object.keys(r).find(k=>k==='坪數'||k.includes('建物移轉總面積')||k.includes('總面積'))||'坪數';
+  const areaKey=findKey(k=>k==='坪數'||k.includes('建物移轉總面積')||k.includes('總面積'))||'坪數';
   const areaRaw=String(r[areaKey]||r['坪數']||r['建坪']||'').trim();
   let area=parseFloat(areaRaw.replace(/,/g,'').match(/([\d.]+)/)?.[1]||'0');
-  if(areaKey.includes('平方公尺'))area=area/3.305785;
+  if(cleanKey(areaKey).includes('平方公尺'))area=area/3.305785;
   if(!area||area<3)return null;
 
   const floorRaw=String(
@@ -960,15 +964,16 @@ function parseRow(r){
   const floor=pf(floorPart.split(',')[0].trim());
   const totalFloor=pf(totalPart);
 
-  const totalKey=Object.keys(r).find(k=>k==='總價'||k.includes('總價')&&!k.includes('車位'))||'總價';
+  const totalKey=findKey(k=>(k==='總價'||k.includes('總價'))&&!k.includes('車位'))||'總價';
   const totalRaw=String(r[totalKey]||'').trim();
-  let totalPrice=parseFloat(totalRaw.replace(/,/g,'').match(/([\d.]+)/)?.[1]||'0')||Math.round(unitPrice*area);
-  if(totalKey.includes('元'))totalPrice=totalPrice/10000;
+  let totalPrice=parseFloat(totalRaw.replace(/,/g,'').match(/([\d.]+)/)?.[1]||'0');
+  if(cleanKey(totalKey).includes('元')&&!cleanKey(totalKey).includes('萬元'))totalPrice=totalPrice/10000;
+  if(!totalPrice||isNaN(totalPrice)||totalPrice<=0)totalPrice=Math.round(unitPrice*area);
 
   const stdRaw=String(r['交易標的']||'').trim();
   const carMatch=stdRaw.match(/車([0-9]+)/);
   const hasCarInStd=stdRaw.includes('車位');
-  const parkKey=Object.keys(r).find(k=>k==='車位價格'||k==='車位總價'||k.includes('車位總價'))||'車位總價';
+  const parkKey=findKey(k=>k==='車位價格'||k==='車位總價'||k.includes('車位總價'))||'車位總價';
   const parkingRaw=String(r[parkKey]||r['車位價格']||'').trim();
   const parking=(parkingRaw&&parkingRaw!=='NaN')?parseFloat(parkingRaw.replace(/,/g,''))||0:0;
   const carCount=carMatch?parseInt(carMatch[1]):((hasCarInStd||parking>0)?1:0);
