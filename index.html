@@ -28,6 +28,13 @@
   .hint-box{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:0.78rem;color:var(--muted);text-align:left;line-height:1.7;}
   .hint-box strong{color:var(--accent3);}
   .hint-box code{font-family:'DM Mono',monospace;background:rgba(255,255,255,0.07);padding:1px 5px;border-radius:3px;font-size:0.75rem;color:var(--text);}
+  .cloud-cats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px;}
+  .cloud-cat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:13px 14px;color:var(--text);font-family:'Noto Serif TC',serif;cursor:pointer;text-align:left;transition:all 0.2s;}
+  .cloud-cat:hover,.cloud-cat.active{border-color:var(--accent);background:rgba(232,200,74,0.08);}
+  .cloud-cat .cat-title{font-weight:700;color:var(--accent3);font-size:0.9rem;}
+  .cloud-cat .cat-meta{font-family:'DM Mono',monospace;color:var(--muted);font-size:0.68rem;margin-top:4px;}
+  .cloud-back{background:transparent;border:none;color:var(--muted);font-family:'Noto Serif TC',serif;font-size:0.78rem;cursor:pointer;margin-bottom:8px;padding:4px 0;}
+  .cloud-back:hover{color:var(--accent);}
   .btn-upload{background:var(--accent);color:#0f1117;border:none;border-radius:8px;padding:10px 28px;font-family:'Noto Serif TC',serif;font-weight:700;font-size:0.95rem;cursor:pointer;transition:all 0.2s;}
   .btn-upload:hover{background:#f0d44e;transform:translateY(-1px);}
   #fileInput{display:none;}
@@ -155,8 +162,10 @@
   <!-- data/ 資料夾來源清單（GitHub Pages 模式） -->
   <div id="dataSourcePanel" style="margin-bottom:16px;display:none">
     <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px;font-family:'DM Mono',monospace">📁 data/ 資料夾</div>
+    <div id="dataCategoryList" class="cloud-cats"></div>
+    <button id="dataCategoryBack" class="cloud-back" onclick="showDataCategories()" style="display:none">← 返回分類</button>
     <div id="dataSourceList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
-    <button class="btn-upload" onclick="loadCheckedSources()" style="font-size:0.88rem;padding:9px 28px">載入勾選的資料</button>
+    <button id="dataLoadBtn" class="btn-upload" onclick="loadCheckedSources()" style="font-size:0.88rem;padding:9px 28px;display:none">載入勾選的資料</button>
   </div>
 
   <div style="color:var(--muted);font-size:0.75rem;margin-bottom:12px">── 或選擇本機檔案 ──</div>
@@ -291,38 +300,97 @@ let rawData=[],charts={},currentMode='normal',currentTab='quarterly';
 let sources=[]; // [{fileName, rows, data}]
 
 // ── data/ 資料夾來源（GitHub Pages 模式）──
+function dataUrl(file){
+  const encoded=String(file).split('/').map(part=>encodeURIComponent(part)).join('/');
+  return `./data/${encoded}`;
+}
+
+function getSourceCategory(s){
+  if(s.category)return s.category;
+  if(s.mode==='townhouse')return 'townhouse';
+  return String(s.name||s.file||'').includes('公寓')?'apartment':'building';
+}
+
+function getCategoryLabel(cat){
+  return {building:'大樓',apartment:'公寓',townhouse:'透天'}[cat]||cat;
+}
+
 async function initDataSources(){
   try{
-    const res=await fetch('data/sources.json');
-    if(!res.ok)return; // 本機開啟時不會有這個檔案，靜默跳過
+    const url=`${dataUrl('sources.json')}?v=${Date.now()}`;
+    const res=await fetch(url,{cache:'no-store'});
+    if(!res.ok)throw new Error(`${url} 載入失敗 (${res.status})`);
     const sources=await res.json(); // [{name, file, mode}]
-    if(!sources?.length)return;
+    if(!sources?.length)throw new Error('sources.json 沒有資料來源');
     const panel=document.getElementById('dataSourcePanel');
-    const list=document.getElementById('dataSourceList');
-    if(!panel||!list)return;
+    if(!panel)return;
     panel.style.display='block';
-    list.innerHTML=sources.map((s,i)=>`
+    window._dataSources=sources.map(s=>({...s,category:getSourceCategory(s)}));
+    showDataCategories();
+  }catch(e){
+    setStatus(`讀不到 data/sources.json：${e.message}`,'error');
+    console.error('initDataSources failed:',e);
+  }
+}
+
+function showDataCategories(){
+  const sources=window._dataSources||[];
+  const catList=document.getElementById('dataCategoryList');
+  const list=document.getElementById('dataSourceList');
+  const back=document.getElementById('dataCategoryBack');
+  const loadBtn=document.getElementById('dataLoadBtn');
+  if(!catList||!list)return;
+  const cats=['building','apartment','townhouse'].map(cat=>({
+    cat,
+    items:sources.filter(s=>s.category===cat)
+  })).filter(g=>g.items.length);
+  catList.style.display='grid';
+  back.style.display='none';
+  loadBtn.style.display='none';
+  list.innerHTML='';
+  window._activeDataCategory='';
+  catList.innerHTML=cats.map(g=>`
+    <button class="cloud-cat" onclick="selectDataCategory('${g.cat}')">
+      <div class="cat-title">${getCategoryLabel(g.cat)}</div>
+      <div class="cat-meta">${g.items.length} 個資料來源</div>
+    </button>`).join('');
+}
+
+function selectDataCategory(category){
+  const sources=(window._dataSources||[]).filter(s=>s.category===category);
+  const catList=document.getElementById('dataCategoryList');
+  const list=document.getElementById('dataSourceList');
+  const back=document.getElementById('dataCategoryBack');
+  const loadBtn=document.getElementById('dataLoadBtn');
+  if(!list)return;
+  window._activeDataCategory=category;
+  catList.style.display='none';
+  back.style.display='';
+  loadBtn.style.display='';
+  list.innerHTML=`
+    <div style="font-size:0.72rem;color:var(--muted);margin-bottom:2px;font-family:'DM Mono',monospace;text-align:left">
+      ${getCategoryLabel(category)} / ${sources.length} 個資料來源
+    </div>
+    ${sources.map((s,i)=>`
       <label style="display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;cursor:pointer;text-align:left">
         <input type="checkbox" id="dsrc_${i}" value="${i}" checked style="width:16px;height:16px;accent-color:var(--accent)">
         <span style="font-size:0.85rem;color:var(--accent3);flex:1">${s.name}</span>
         <span style="font-size:0.7rem;color:var(--muted);font-family:'DM Mono',monospace">${s.mode==='townhouse'?'透天':'一般住宅'}</span>
-      </label>`).join('');
-    // 把 sources 存起來供載入用
-    window._dataSources=sources;
-  }catch(e){
-    // 本機檔案模式，正常跳過
-  }
+      </label>`).join('')}`;
 }
 
 async function loadCheckedSources(){
-  const sources=window._dataSources||[];
+  const category=window._activeDataCategory;
+  const sources=(window._dataSources||[]).filter(s=>!category||s.category===category);
   const checked=sources.filter((_,i)=>document.getElementById(`dsrc_${i}`)?.checked);
   if(!checked.length){setStatus('請至少勾選一個來源','error');return;}
   setStatus(`載入中，共 ${checked.length} 個來源…`);
+  window._bulkLoadingSources=true;
   for(const s of checked){
     try{
-      const res=await fetch(`data/${s.file}`);
-      if(!res.ok)throw new Error(`${s.file} 載入失敗 (${res.status})`);
+      const url=`${dataUrl(s.file)}?v=${Date.now()}`;
+      const res=await fetch(url,{cache:'no-store'});
+      if(!res.ok)throw new Error(`${url} 載入失敗 (${res.status})`);
       const buf=await res.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
       const {rows,sheet2Rows}=workbookToRows(wb);
@@ -335,7 +403,13 @@ async function loadCheckedSources(){
       setStatus(`${s.name} 載入失敗：${err.message}`,'error');
     }
   }
-  if(sources.length)mergeAndAnalyze();
+  window._bulkLoadingSources=false;
+  if(sources.length){
+    const prevMode=currentMode;
+    currentMode=checked[0]?.mode||prevMode;
+    mergeAndAnalyze();
+    currentMode=prevMode;
+  }
 }
 function setMode(mode){
   currentMode=mode;
@@ -613,7 +687,7 @@ function addSource(rows,fileName,sheet2Rows){
   document.getElementById('uploadZone').style.display='none';
   renderSourceList();
   // 只有一筆來源時直接觸發合併分析（不需手動按按鈕）
-  if(sources.length===1){
+  if(sources.length===1&&!window._bulkLoadingSources){
     mergeAndAnalyze();
   } else {
     setStatus(`已加入「${fileName}」（${parsed.length} 筆），可繼續新增來源或直接合併分析`,'success');
